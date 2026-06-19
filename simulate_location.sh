@@ -1,18 +1,54 @@
 #!/bin/bash
 #
-# iOS 17+ 模擬 GPS 位置 一鍵腳本
+# iOS 17+ 模擬 GPS 位置 一鍵腳本（含自動環境檢查）
 # 用法: ./simulate_location.sh <緯度> <經度>
 # 範例: ./simulate_location.sh 22.98667112038 120.233674915616
 #
-# 需求: pymobiledevice3 已安裝, iPhone 已開啟開發者模式並用 USB 連接
+# 會自動檢查並安裝 Homebrew / Python3 / pymobiledevice3
 #
 
 set -e
 
-PYTHON_BIN="/usr/local/bin/python"
 LOG_FILE="/tmp/tunneld_log_$$.txt"
 
-# 檢查參數
+# ============================
+# 第一階段：環境檢查與安裝
+# ============================
+echo "🔍 正在檢查環境..."
+
+if ! command -v brew &> /dev/null; then
+  echo "⚠️ 未偵測到 Homebrew，正在安裝..."
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+else
+  echo "✅ Homebrew 已安裝"
+fi
+
+if ! command -v python3 &> /dev/null; then
+  echo "⚠️ 未偵測到 Python3，正在透過 Homebrew 安裝..."
+  brew install python@3.10
+else
+  echo "✅ 已安裝 $(python3 --version)"
+fi
+
+if ! command -v pip3 &> /dev/null; then
+  echo "❌ 未偵測到 pip3，請確認 Python 安裝是否完整"
+  exit 1
+fi
+
+if ! python3 -m pymobiledevice3 version &> /dev/null; then
+  echo "⚠️ 未偵測到 pymobiledevice3，正在安裝..."
+  pip3 install pymobiledevice3
+else
+  echo "✅ 已安裝 pymobiledevice3 ($(python3 -m pymobiledevice3 version))"
+fi
+
+PYTHON_BIN=$(command -v python3)
+echo "🎉 環境檢查完成，使用 Python: $PYTHON_BIN"
+echo ""
+
+# ============================
+# 第二階段：參數檢查
+# ============================
 if [ $# -ne 2 ]; then
   echo "用法: $0 <緯度> <經度>"
   echo "範例: $0 22.98667112038 120.233674915616"
@@ -24,7 +60,9 @@ LON="$2"
 
 echo "🚀 準備將 iOS 設備定位修改為 緯度: $LAT, 經度: $LON ..."
 
-# 清理函數: 結束時關閉 tunneld
+# ============================
+# 第三階段：tunneld 與模擬定位
+# ============================
 cleanup() {
   if [ -n "$TUNNELD_PID" ]; then
     echo "🛑 正在關閉 tunneld (PID: $TUNNELD_PID)..."
@@ -34,12 +72,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 啟動 tunneld 並在背景執行，輸出寫入 log 檔
 echo "📡 啟動 tunneld..."
 sudo "$PYTHON_BIN" -m pymobiledevice3 remote tunneld > "$LOG_FILE" 2>&1 &
 TUNNELD_PID=$!
 
-# 等待 tunnel 建立並抓取 RSD 資訊（USB 連線）
 echo "⏳ 等待 USB 隧道建立 (最長等待 30 秒)..."
 RSD_ADDR=""
 RSD_PORT=""
@@ -65,7 +101,6 @@ fi
 
 echo "✅ 取得 RSD 位址: $RSD_ADDR  Port: $RSD_PORT"
 
-# 執行模擬位置指令
 echo "📍 正在設定模擬位置..."
 "$PYTHON_BIN" -m pymobiledevice3 developer dvt simulate-location set \
   --rsd "$RSD_ADDR" "$RSD_PORT" \
